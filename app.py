@@ -89,4 +89,39 @@ if "pomysly" in st.session_state:
     st.write(f"Wybrano pomysłów: {len(wybrane_pomysly)}")
     st.write(f"Do wygenerowania łącznie: {len(wybrane_pomysly) * ilosc_rysunkow} obrazków.")
 
+    st.divider()
+    
+    if st.button("Wygeneruj wybrane rysunki"):
+        
+        # OCHRANIACZ 1: Użytkownik kliknął, ale nie wybrał żadnego pomysłu z listy
+        if not wybrane_pomysly:
+            st.warning("⚠️ Wybierz najpierw przynajmniej jeden pomysł z listy powyżej!")
+        else:
+            # Pętla główna: przechodzimy przez każdy zaznaczony pomysł
+            for pomysl in wybrane_pomysly:
+                st.subheader(f"🎨 {pomysl.title}")
+                
+                # OCHRANIACZ 2: Użytkownik skasował opis wizualny
+                if not pomysl.visual_description.strip():
+                    st.error("❌ Opis wizualny nie może być pusty! Uzupełnij go, aby wygenerować obraz.")
+                    continue # Przerywa pętlę dla tego konkretnego pomysłu i idzie do następnego
+                    
+                # Pętla wariantów: malujemy tyle sztuk, ile wskazuje suwak
+                for i in range(ilosc_rysunkow):
+                    with st.spinner(f"Maluję wariant {i+1} dla: {pomysl.title}... (To może potrwać kilkanaście sekund)"):
+                        
+                        try:
+                            # Przekazujemy do API wszystkie parametry ustawione w interfejsie
+                            obrazek_odpowiedz = client.images.generate(
+                                model="dall-e-3",
+                                prompt=f"Czysty wektorowy line-art (lineart) w stylu dziecięcej książeczki do kolorowania. Absolutny zakaz używania jakichkolwiek kolorów, obraz musi być 100% monochromatyczny (tylko czarna linia i czyste białe tło, zero szarości). CAŁKOWITY ZAKAZ cieniowania, kropkowania (stippling) i gęstego kreskowania. Tylko grube, pojedyncze, wyraźne czarne kontury. Tematyka: {pomysl.visual_description}. Rysunek ma być dostosowany do wieku odbiorcy: {pomysl.recipient_age} lat. Poziom skomplikowania i trudności: {pomysl.difficulty}/5. Orientacyjna liczba głównych elementów na obrazku: {pomysl.number_of_elements}."
+                            )
+                            
+                            adres_obrazka = obrazek_odpowiedz.data[0].url
+                            st.image(adres_obrazka, caption=f"Wariant {i+1} - {pomysl.title}")
+                            
+                        except Exception as e:
+                            # Jeśli API rzuci błędem (np. filtry NSFW), chwytamy go tutaj
+                            st.error("⚠️ Nie udało się wygenerować obrazka. Możliwe, że opis narusza zasady bezpieczeństwa API lub wystąpił błąd po stronie serwera.")
+
    
