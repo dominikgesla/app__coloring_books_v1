@@ -3,6 +3,8 @@ import instructor
 import openai
 from pydantic import BaseModel 
 from dotenv import load_dotenv
+import json
+import requests
 
 load_dotenv()
 
@@ -15,6 +17,26 @@ class ColoringPage(BaseModel):
     recipient_age: int
     visual_description: str
 
+st.sidebar.header("📁 Zarządzanie sesją")
+
+plik_sesji = st.sidebar.file_uploader("Wczytaj zapisaną sesję (plik JSON)", type=["json"])
+
+if plik_sesji is not None:
+    try:
+        # Odczytuje dane z pliku
+        dane_z_pliku = json.load(plik_sesji)
+        # Zmieniam zwykły tekst z powrotem na nasze specjalne obiekty ColoringPage
+        # Używam operatora ** (rozpakowanie słownika), aby odtworzyć obiekty
+        st.session_state.pomysly = [ColoringPage(**element) for element in dane_z_pliku]
+        
+        # Zabezpieczenie dla generowania nowych kluczy widgetów
+        if "generation_id" not in st.session_state:
+            st.session_state.generation_id = 999 
+            
+        st.sidebar.success("✅ Sesja wczytana pomyślnie!")
+    except Exception as e:
+        st.sidebar.error("❌ Błąd wczytywania pliku. Upewnij się, że to poprawny plik sesji.")
+
 st.title("Generator kolorowanek")
 
 temat_kolorowanki = st.text_input ("Opisz, co ma byc na kolorowance")
@@ -23,6 +45,9 @@ liczba_pomyslow = st.slider("Ile pomysłów chcesz wygenerować?", min_value=1, 
 
 if "generation_id" not in st.session_state:
     st.session_state.generation_id = 0   
+
+if "wygenerowane_obrazki" not in st.session_state:
+    st.session_state.wygenerowane_obrazki = []
 
 if st.button("Stwórz pomysły na kolorowanki"):
     if not temat_kolorowanki.strip():
@@ -50,6 +75,19 @@ if st.button("Stwórz pomysły na kolorowanki"):
 
 
 if "pomysly" in st.session_state:
+
+    st.sidebar.divider()
+    st.sidebar.subheader("Zapisz obecne pomysły")
+    
+    dane_do_zapisu = [p.model_dump() for p in st.session_state.pomysly]
+    sesja_json = json.dumps(dane_do_zapisu, ensure_ascii=False, indent=4)
+    
+    st.sidebar.download_button(
+        label="💾 Pobierz sesję na dysk",
+        data=sesja_json,
+        file_name="moje_pomysly_na_kolorowanki.json",
+        mime="application/json"
+    )
 
     st.divider()
     st.subheader("🧐 Przejrzyj propozycje")
@@ -93,35 +131,68 @@ if "pomysly" in st.session_state:
     
     if st.button("Wygeneruj wybrane rysunki"):
         
-        # OCHRANIACZ 1: Użytkownik kliknął, ale nie wybrał żadnego pomysłu z listy
         if not wybrane_pomysly:
             st.warning("⚠️ Wybierz najpierw przynajmniej jeden pomysł z listy powyżej!")
         else:
-            # Pętla główna: przechodzimy przez każdy zaznaczony pomysł
+            # Czyścimy starą galerię przed nowym malowaniem
+            st.session_state.wygenerowane_obrazki = []
+            
+            # Tworzymy pusty kontener na podgląd generowanego obrazu
+            kontener_podgladu = st.empty()
+            
             for pomysl in wybrane_pomysly:
-                st.subheader(f"🎨 {pomysl.title}")
+                st.subheader(f"🎨 Generuję: {pomysl.title}...")
                 
-                # OCHRANIACZ 2: Użytkownik skasował opis wizualny
                 if not pomysl.visual_description.strip():
                     st.error("❌ Opis wizualny nie może być pusty! Uzupełnij go, aby wygenerować obraz.")
-                    continue # Przerywa pętlę dla tego konkretnego pomysłu i idzie do następnego
+                    continue
                     
-                # Pętla wariantów: malujemy tyle sztuk, ile wskazuje suwak
                 for i in range(ilosc_rysunkow):
-                    with st.spinner(f"Maluję wariant {i+1} dla: {pomysl.title}... (To może potrwać kilkanaście sekund)"):
-                        
+                    with st.spinner(f"Maluję wariant {i+1} dla: {pomysl.title}..."):
                         try:
-                            # Przekazujemy do API wszystkie parametry ustawione w interfejsie
+                            # 1. API generuje
                             obrazek_odpowiedz = client.images.generate(
                                 model="dall-e-3",
                                 prompt=f"Czysty wektorowy line-art (lineart) w stylu dziecięcej książeczki do kolorowania. Absolutny zakaz używania jakichkolwiek kolorów, obraz musi być 100% monochromatyczny (tylko czarna linia i czyste białe tło, zero szarości). CAŁKOWITY ZAKAZ cieniowania, kropkowania (stippling) i gęstego kreskowania. Tylko grube, pojedyncze, wyraźne czarne kontury. Tematyka: {pomysl.visual_description}. Rysunek ma być dostosowany do wieku odbiorcy: {pomysl.recipient_age} lat. Poziom skomplikowania i trudności: {pomysl.difficulty}/5. Orientacyjna liczba głównych elementów na obrazku: {pomysl.number_of_elements}."
                             )
-                            
+
                             adres_obrazka = obrazek_odpowiedz.data[0].url
-                            st.image(adres_obrazka, caption=f"Wariant {i+1} - {pomysl.title}")
+                            image_data = requests.get(adres_obrazka).content
+                            
+                            # Wyświetlamy obrazek w kontenerze podglądu natychmiast po namalowaniu
+                            kontener_podgladu.image(image_data, caption=f"👀 Podgląd na żywo: {pomysl.title} (Wariant {i+1})")
+                            
+                            # 2. Wrzucamy do Session state
+                            st.session_state.wygenerowane_obrazki.append({
+                                "tytul": pomysl.title,
+                                "wariant": i + 1,
+                                "dane_bajty": image_data
+                            })
                             
                         except Exception as e:
-                            # Jeśli API rzuci błędem (np. filtry NSFW), chwytamy go tutaj
-                            st.error("⚠️ Nie udało się wygenerować obrazka. Możliwe, że opis narusza zasady bezpieczeństwa API lub wystąpił błąd po stronie serwera.")
+                            st.error(f"⚠️ Wystąpił błąd podczas generowania: {e}")
+                            
+            # Po zakończeniu pętli, czyścimy kontener, aby nie dublował Galerii na dole
+            kontener_podgladu.empty()
+
+    # GALERIA WYGENEROWANYCH OBRAZKÓW
+    if st.session_state.wygenerowane_obrazki:
+        st.divider()
+        st.subheader("🖼️ Gotowe kolorowanki do pobrania:")
+        
+        for idx, img in enumerate(st.session_state.wygenerowane_obrazki):
+            # Wyświetlamy z Session state
+            st.image(img["dane_bajty"], caption=f"{img['tytul']} - Wariant {img['wariant']}")
+            
+            bezpieczny_tytul = img["tytul"].replace(' ', '_').replace('"', '')
+            
+            # Tworzymy guzik pobierania
+            st.download_button(
+                label=f"💾 Pobierz: {img['tytul']} (Wariant {img['wariant']})",
+                data=img["dane_bajty"],
+                file_name=f"kolorowanka_{bezpieczny_tytul}_wariant_{img['wariant']}.png",
+                mime="image/png",
+                key=f"dl_galeria_{idx}_{st.session_state.generation_id}"
+            )
 
    
