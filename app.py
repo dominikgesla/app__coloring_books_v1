@@ -1,14 +1,35 @@
 import streamlit as st
 import instructor
 import openai
+import os
 from pydantic import BaseModel 
 from dotenv import load_dotenv
 import json
 import requests
+print(f"DEBUG: Klucz w systemie: {os.environ.get('OPENAI_API_KEY')}")
 
 load_dotenv()
 
-client = instructor.from_openai(openai.OpenAI())
+# ==========================================
+# WERYFIKACJA KLUCZA API
+# ==========================================
+st.sidebar.header("🔑 Ustawienia API")
+
+# Próbujemy pobrać klucz z ukrytego środowiska (np. pliku .env)
+api_key = os.environ.get("OPENAI_API_KEY")
+
+# Jeśli klucza nie znaleziono 
+if not api_key:
+    api_key = st.sidebar.text_input("Wklej swój klucz OpenAI API:", type="password")
+    
+    if not api_key:
+        # Jeśli użytkownik jeszcze nic nie wpisał, pokazujemy komunikat i ZATRZYMUJEMY aplikację
+        st.info("💡 Aplikacja wymaga klucza OpenAI do działania. Wprowadź go w panelu bocznym po lewej stronie.")
+        st.stop() # 🛑 Szlaban! Streamlit nie czyta kodu poniżej tej linijki.
+
+# Jeśli kod dotarł tutaj, to znaczy, że mamy klucz (z pliku lub od użytkownika)
+# Inicjalizujemy aplikacje z użyciem tego konkretnego klucza
+client = instructor.from_openai(openai.OpenAI(api_key=api_key))
 
 class ColoringPage(BaseModel):
     title: str
