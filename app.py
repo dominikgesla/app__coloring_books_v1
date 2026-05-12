@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import json
 import requests
-print(f"DEBUG: Klucz w systemie: {os.environ.get('OPENAI_API_KEY')}")
 
 load_dotenv()
 
